@@ -1,0 +1,200 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String     @id @default(cuid()) @db.VarChar(64)
+  name         String     @db.VarChar(160)
+  email        String     @unique @db.VarChar(190)
+  role         String     @db.VarChar(32)
+  isActive     Boolean    @default(true) @map("is_active")
+  passwordHash String?    @map("password_hash") @db.VarChar(255)
+  lastLoginAt  DateTime?  @map("last_login_at")
+  createdAt    DateTime   @default(now()) @map("created_at")
+  updatedAt    DateTime   @updatedAt @map("updated_at")
+  auditLogs    AuditLog[]
+
+  @@map("users")
+}
+
+model Department {
+  id        String   @id @default(cuid()) @db.VarChar(64)
+  name      String   @unique @db.VarChar(120)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  members   Member[]
+
+  @@map("departments")
+}
+
+model Member {
+  id               String               @id @default(cuid()) @db.VarChar(64)
+  memberNo         String?              @unique @map("member_no") @db.VarChar(64)
+  name             String               @db.VarChar(180)
+  normalizedName   String               @map("normalized_name") @db.VarChar(180)
+  departmentId     String?              @map("department_id") @db.VarChar(64)
+  employeeType     String               @map("employee_type") @db.VarChar(32)
+  status           String               @db.VarChar(32)
+  joinedAt         DateTime?            @map("joined_at") @db.Date
+  note             String?
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  department       Department?          @relation(fields: [departmentId], references: [id])
+  contributions    MemberContribution[]
+  cashTransactions CashTransaction[]
+  loans            Loan[]
+
+  @@index([departmentId])
+  @@index([status])
+  @@map("members")
+}
+
+model Fund {
+  id               String               @id @default(cuid()) @db.VarChar(64)
+  code             String               @unique @db.VarChar(80)
+  name             String               @db.VarChar(140)
+  isSystem         Boolean              @default(false) @map("is_system")
+  isActive         Boolean              @default(true) @map("is_active")
+  createdAt        DateTime             @default(now()) @map("created_at")
+  updatedAt        DateTime             @updatedAt @map("updated_at")
+  contributionRate ContributionRate[]
+  contributions    MemberContribution[]
+  cashTransactions CashTransaction[]
+
+  @@map("funds")
+}
+
+model CashSource {
+  id        String   @id @default(cuid()) @db.VarChar(64)
+  name      String   @db.VarChar(140)
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  loans     Loan[]
+
+  @@map("cash_sources")
+}
+
+model ContributionRate {
+  id            String    @id @default(cuid()) @db.VarChar(64)
+  fundId        String    @map("fund_id") @db.VarChar(64)
+  employeeType  String    @map("employee_type") @db.VarChar(32)
+  amountIdr     Int       @map("amount_idr")
+  effectiveFrom DateTime  @map("effective_from") @db.Date
+  effectiveTo   DateTime? @map("effective_to") @db.Date
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+  fund          Fund      @relation(fields: [fundId], references: [id])
+
+  @@index([fundId])
+  @@map("contribution_rates")
+}
+
+model MemberContribution {
+  id          String   @id @default(cuid()) @db.VarChar(64)
+  memberId    String   @map("member_id") @db.VarChar(64)
+  fundId      String   @map("fund_id") @db.VarChar(64)
+  periodMonth DateTime @map("period_month") @db.Date
+  amountIdr   Int      @map("amount_idr")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+  member      Member   @relation(fields: [memberId], references: [id])
+  fund        Fund     @relation(fields: [fundId], references: [id])
+
+  @@unique([memberId, fundId, periodMonth])
+  @@index([periodMonth])
+  @@index([fundId])
+  @@map("member_contributions")
+}
+
+model CashTransaction {
+  id               String   @id @default(cuid()) @db.VarChar(64)
+  transactionDate  DateTime @map("transaction_date") @db.Date
+  direction        String   @db.VarChar(16)
+  fundId           String?  @map("fund_id") @db.VarChar(64)
+  memberId         String?  @map("member_id") @db.VarChar(64)
+  counterpartyName String?  @map("counterparty_name") @db.VarChar(180)
+  category         String   @db.VarChar(120)
+  amountIdr        Int      @map("amount_idr")
+  note             String?
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+  fund             Fund?    @relation(fields: [fundId], references: [id])
+  member           Member?  @relation(fields: [memberId], references: [id])
+
+  @@index([transactionDate])
+  @@index([fundId])
+  @@index([memberId])
+  @@map("cash_transactions")
+}
+
+model Loan {
+  id                 String        @id @default(cuid()) @db.VarChar(64)
+  memberId           String?       @map("member_id") @db.VarChar(64)
+  counterpartyName   String?       @map("counterparty_name") @db.VarChar(180)
+  cashSourceId       String        @map("cash_source_id") @db.VarChar(64)
+  principalAmountIdr Int           @map("principal_amount_idr")
+  paidAmountIdr      Int           @default(0) @map("paid_amount_idr")
+  remainingAmountIdr Int           @map("remaining_amount_idr")
+  loanDate           DateTime      @map("loan_date") @db.Date
+  status             String        @db.VarChar(32)
+  note               String?
+  createdAt          DateTime      @default(now()) @map("created_at")
+  updatedAt          DateTime      @updatedAt @map("updated_at")
+  member             Member?       @relation(fields: [memberId], references: [id])
+  cashSource         CashSource    @relation(fields: [cashSourceId], references: [id])
+  payments           LoanPayment[]
+
+  @@index([status])
+  @@index([memberId])
+  @@index([cashSourceId])
+  @@map("loans")
+}
+
+model LoanPayment {
+  id          String   @id @default(cuid()) @db.VarChar(64)
+  loanId      String   @map("loan_id") @db.VarChar(64)
+  paymentDate DateTime @map("payment_date") @db.Date
+  amountIdr   Int      @map("amount_idr")
+  note        String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  loan        Loan     @relation(fields: [loanId], references: [id])
+
+  @@index([loanId])
+  @@map("loan_payments")
+}
+
+model ImportBatch {
+  id               String    @id @default(cuid()) @db.VarChar(64)
+  fileName         String    @map("file_name") @db.VarChar(255)
+  originalFileName String    @map("original_file_name") @db.VarChar(255)
+  status           String    @db.VarChar(32)
+  summaryJson      Json?     @map("summary_json")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  committedAt      DateTime? @map("committed_at")
+
+  @@map("import_batches")
+}
+
+model AuditLog {
+  id         String   @id @default(cuid()) @db.VarChar(64)
+  userId     String?  @map("user_id") @db.VarChar(64)
+  userName   String   @map("user_name") @db.VarChar(160)
+  action     String   @db.VarChar(80)
+  entityType String   @map("entity_type") @db.VarChar(80)
+  entityId   String?  @map("entity_id") @db.VarChar(64)
+  ipAddress  String?  @map("ip_address") @db.VarChar(64)
+  createdAt  DateTime @default(now()) @map("created_at")
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId])
+  @@map("audit_logs")
+}
