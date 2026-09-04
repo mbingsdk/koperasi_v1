@@ -4,6 +4,15 @@ export type MemberStatus = 'active' | 'inactive'
 export type LoanStatus = 'active' | 'paid' | 'cancelled'
 export type TransactionDirection = 'inflow' | 'outflow'
 export type ImportStatus = 'uploaded' | 'previewed' | 'committed' | 'failed' | 'cancelled'
+export type ImportRowGroup = 'members' | 'dues' | 'cashTransactions' | 'loans'
+export type ImportRowRef = string | number
+export type ImportSkippedRows = Partial<Record<ImportRowGroup, ImportRowRef[]>>
+export type ImportDuplicateRows = Partial<Record<ImportRowGroup, ImportRowRef[]>>
+export type ImportConflictRows = Partial<Record<ImportRowGroup, ImportRowRef[]>>
+export type ImportDuplicateGroups = Partial<Record<ImportRowGroup, Array<{
+  key: string
+  rows: ImportRowRef[]
+}>>>
 export type AuditAction =
   | 'login' | 'logout'
   | 'member.create' | 'member.update' | 'member.deactivate'
@@ -11,7 +20,7 @@ export type AuditAction =
   | 'cash.create' | 'cash.update' | 'cash.delete'
   | 'loan.create' | 'loan.update' | 'loan.delete'
   | 'loan_payment.create' | 'loan_payment.delete'
-  | 'import.commit'
+  | 'import.commit' | 'import.partial_commit'
   | 'report.export'
   | 'user.create' | 'user.update' | 'user.deactivate'
   | 'department.create' | 'department.update' | 'department.deactivate'
@@ -119,6 +128,7 @@ export interface ImportBatch {
   originalFileName: string
   status: ImportStatus
   summary?: {
+    sourceFiles?: string[]
     sheetsDetected: string[]
     membersDetected: number
     contributionsDetected: number
@@ -132,6 +142,66 @@ export interface ImportBatch {
       col?: string
       msg: string
     }>
+    mappedRows?: {
+      members: Array<{
+        importKey?: string
+        row: number
+        sourceFile?: string
+        sourceSheet?: string
+        memberNo?: string
+        name: string
+        departmentName?: string
+        employeeType?: EmployeeType
+        joinedAt?: string
+      }>
+      dues: Array<{
+        importKey?: string
+        row: number
+        sourceFile?: string
+        sourceSheet?: string
+        memberName: string
+        fundCode: string
+        periodMonth: string
+        amountIdr: number
+        note?: string
+      }>
+      cashTransactions: Array<{
+        importKey?: string
+        row: number
+        sourceFile?: string
+        sourceSheet?: string
+        transactionDate: string
+        direction: TransactionDirection
+        fundCode?: string
+        counterpartyName?: string
+        category: string
+        amountIdr: number
+        note?: string
+      }>
+      loans: Array<{
+        importKey?: string
+        row: number
+        sourceFile?: string
+        sourceSheet?: string
+        borrowerName: string
+        cashSourceName?: string
+        principalAmountIdr: number
+        paidAmountIdr?: number
+        loanDate: string
+        note?: string
+      }>
+    }
+    duplicateRows?: ImportDuplicateRows
+    duplicateGroups?: ImportDuplicateGroups
+    conflictRows?: ImportConflictRows
+    skippedRows?: ImportSkippedRows
+    committedGroups?: Partial<Record<ImportRowGroup, boolean>>
+    committedCounts?: {
+      members: number
+      contributions: number
+      transactions: number
+      loans: number
+    }
   }
   createdAt: string
   committedAt?: string

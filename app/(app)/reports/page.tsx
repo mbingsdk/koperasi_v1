@@ -6,7 +6,8 @@ import FilterBar from '@/components/ui/FilterBar'
 import ResponsiveLedger from '@/components/ui/ResponsiveLedger'
 import EmptyState from '@/components/ui/EmptyState'
 import { Field, Input } from '@/components/ui/Field'
-import { downloadCsv, useCashLedger, useReports } from '@/lib/store'
+import { useCashLedger, useReports } from '@/lib/store'
+import { downloadXlsx, type ExcelRow } from '@/lib/export/excel'
 import { rp, fmtDate } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import { useToast } from '@/components/ui/Toast'
@@ -81,48 +82,73 @@ export default function ReportsPage() {
     }
   }, [apiSummary, cashRows, reports.loans, reports.summary.balance, reports.summary.duesTotal, unpaid.length])
 
-  const exportFilename = `koperasi-${activeType.key === 'monthly' ? 'laporan-bulanan' : activeType.key === 'ledger' ? 'buku-kas' : activeType.key === 'arrears' ? 'tunggakan' : 'pinjaman'}-${monthSlug(from)}.csv`
+  const exportFilename = `koperasi-${activeType.key === 'monthly' ? 'laporan-bulanan' : activeType.key === 'ledger' ? 'buku-kas' : activeType.key === 'arrears' ? 'tunggakan' : 'pinjaman'}-${monthSlug(from)}.xlsx`
 
-  function exportCsv() {
+  function reportExportRows(): { sheetName: string; rows: ExcelRow[] } {
     if (active === 'ledger') {
-      downloadCsv(exportFilename, cashRows.map(tx => ({
-        tanggal: tx.transactionDate,
-        kategori: tx.category,
-        keterangan: tx.note,
-        dana: tx.fund?.name,
-        arah: tx.direction,
-        jumlah: tx.amountIdr,
-        saldo: tx.balance,
-      })))
-    } else if (active === 'arrears') {
-      downloadCsv(exportFilename, unpaid.map(d => ({
-        anggota: d.member.name,
-        departemen: d.member.department?.name,
-        tipe: d.member.employeeType,
-        seharusnya: expectedDue(d.member.employeeType),
-        dibayar: d.amountIdr,
-      })))
-    } else if (active === 'loans') {
-      downloadCsv(exportFilename, loanRows.map(l => ({
-        peminjam: l.member?.name ?? l.counterpartyName,
-        sumber_kas: l.cashSource.name,
-        tanggal: l.loanDate,
-        pokok: l.principalAmountIdr,
-        dibayar: l.paidAmountIdr,
-        sisa: l.remainingAmountIdr,
-        status: l.status,
-      })))
-    } else {
-      downloadCsv(exportFilename, [
+      return {
+        sheetName: 'Buku Kas',
+        rows: cashRows.map(tx => ({
+          tanggal: tx.transactionDate,
+          kategori: tx.category,
+          keterangan: tx.note,
+          dana: tx.fund?.name,
+          arah: tx.direction,
+          jumlah: tx.amountIdr,
+          saldo: tx.balance,
+        })),
+      }
+    }
+
+    if (active === 'arrears') {
+      return {
+        sheetName: 'Tunggakan',
+        rows: unpaid.map(d => ({
+          anggota: d.member.name,
+          departemen: d.member.department?.name,
+          tipe: d.member.employeeType,
+          seharusnya: expectedDue(d.member.employeeType),
+          dibayar: d.amountIdr,
+        })),
+      }
+    }
+
+    if (active === 'loans') {
+      return {
+        sheetName: 'Pinjaman',
+        rows: loanRows.map(l => ({
+          peminjam: l.member?.name ?? l.counterpartyName,
+          sumber_kas: l.cashSource.name,
+          tanggal: l.loanDate,
+          pokok: l.principalAmountIdr,
+          dibayar: l.paidAmountIdr,
+          sisa: l.remainingAmountIdr,
+          status: l.status,
+        })),
+      }
+    }
+
+    return {
+      sheetName: 'Laporan Bulanan',
+      rows: [
         { metrik: 'Kas masuk', nilai: reportStats.cashInRange },
         { metrik: 'Kas keluar', nilai: reportStats.cashOutRange },
         { metrik: 'Saldo akhir', nilai: reportStats.endingBalance },
         { metrik: 'Iuran diterima', nilai: reportStats.duesTotal },
         { metrik: 'Pinjaman aktif', nilai: reportStats.loanRemaining },
         { metrik: 'Anggota menunggak', nilai: reportStats.unpaidCount },
-      ])
+      ],
     }
-    notify(`CSV ${activeType.label} berhasil dibuat.`)
+  }
+
+  async function exportXlsx() {
+    try {
+      const { sheetName, rows } = reportExportRows()
+      await downloadXlsx(exportFilename, [{ name: sheetName, rows }])
+      notify(`XLSX ${activeType.label} berhasil dibuat.`)
+    } catch {
+      notify('Gagal membuat file XLSX laporan.', 'error')
+    }
   }
 
   return (
@@ -130,7 +156,7 @@ export default function ReportsPage() {
       <PageHeader
         eyebrow="Diolah dari PostgreSQL"
         title="Laporan"
-        actions={<button className="btn report-header-action" onClick={exportCsv}>Ekspor CSV</button>}
+        actions={<button className="btn report-header-action" onClick={() => void exportXlsx()}>Ekspor XLSX</button>}
       />
 
       <section className="report-hero" aria-label="Ringkasan laporan">
@@ -173,7 +199,7 @@ export default function ReportsPage() {
               <h2>{activeType.label}</h2>
               <p>{exportFilename}</p>
             </div>
-            <button className="btn" onClick={exportCsv}>Ekspor CSV</button>
+            <button className="btn" onClick={() => void exportXlsx()}>Ekspor XLSX</button>
           </div>
 
           {active === 'monthly' && (

@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/prisma'
+import type { Prisma } from '@prisma/client'
 import {
   AUDIT_LOGS,
   CASH_SOURCES,
@@ -22,6 +23,9 @@ import type {
   EmployeeType,
   Fund,
   ImportBatch,
+  ImportRowGroup,
+  ImportRowRef,
+  ImportSkippedRows,
   Loan,
   LoanPayment,
   LoanStatus,
@@ -36,6 +40,8 @@ import type {
 const OPENING_BALANCE_IDR = 37_055_000
 const SYSTEM_USER_NAME = 'System'
 const DEMO_PASSWORD = process.env.DEMO_PASSWORD || 'password'
+type PrismaTx = Prisma.TransactionClient
+const IMPORT_GROUPS: ImportRowGroup[] = ['members', 'dues', 'cashTransactions', 'loans']
 
 function asDate(value?: string | null) {
   return value ? new Date(value) : null
@@ -333,8 +339,12 @@ function importSummary(input: Record<string, unknown>): NonNullable<ImportBatch[
   const sheetsDetected = Array.isArray(source.sheetsDetected)
     ? source.sheetsDetected.map(item => text(item)).filter(Boolean)
     : DEFAULT_IMPORT_SHEETS
+  const sourceFiles = Array.isArray(source.sourceFiles)
+    ? source.sourceFiles.map(item => text(item)).filter(Boolean)
+    : []
 
   return {
+    sourceFiles: sourceFiles.length > 0 ? sourceFiles : undefined,
     sheetsDetected: sheetsDetected.length > 0 ? sheetsDetected : DEFAULT_IMPORT_SHEETS,
     membersDetected: countLike(source.membersDetected, 363),
     contributionsDetected: countLike(source.contributionsDetected, 14000),
@@ -342,12 +352,315 @@ function importSummary(input: Record<string, unknown>): NonNullable<ImportBatch[
     loansDetected: countLike(source.loansDetected, 190),
     warnings: countLike(source.warnings, 12),
     errors: countLike(source.errors, 0),
+    warningDetails: Array.isArray(source.warningDetails)
+      ? source.warningDetails as NonNullable<ImportBatch['summary']>['warningDetails']
+      : undefined,
+    mappedRows: source.mappedRows && typeof source.mappedRows === 'object' && !Array.isArray(source.mappedRows)
+      ? source.mappedRows as NonNullable<ImportBatch['summary']>['mappedRows']
+      : undefined,
+    duplicateRows: source.duplicateRows && typeof source.duplicateRows === 'object' && !Array.isArray(source.duplicateRows)
+      ? source.duplicateRows as NonNullable<ImportBatch['summary']>['duplicateRows']
+      : undefined,
+    duplicateGroups: source.duplicateGroups && typeof source.duplicateGroups === 'object' && !Array.isArray(source.duplicateGroups)
+      ? source.duplicateGroups as NonNullable<ImportBatch['summary']>['duplicateGroups']
+      : undefined,
+    conflictRows: source.conflictRows && typeof source.conflictRows === 'object' && !Array.isArray(source.conflictRows)
+      ? source.conflictRows as NonNullable<ImportBatch['summary']>['conflictRows']
+      : undefined,
+    committedGroups: source.committedGroups && typeof source.committedGroups === 'object' && !Array.isArray(source.committedGroups)
+      ? source.committedGroups as NonNullable<ImportBatch['summary']>['committedGroups']
+      : undefined,
   }
 }
 
 function importFileName(originalFileName: string) {
   const safe = originalFileName.toLowerCase().replace(/[^a-z0-9._-]+/g, '_')
   return `import_${Date.now()}_${safe || 'koperasi.xlsx'}`
+}
+
+function stableImportId(prefix: string, batchId: string, key: string | number) {
+  const safeKey = String(key).toLowerCase().replace(/[^a-z0-9_-]+/g, '_')
+  return `${prefix}_${batchId}_${safeKey}`
+}
+
+function importRowRef(row: { row: number; importKey?: string }): ImportRowRef {
+  return row.importKey ?? row.row
+}
+
+function hasImportRowRef(refs: Set<ImportRowRef>, row: { row: number; importKey?: string }) {
+  return refs.has(importRowRef(row)) || refs.has(row.row)
+}
+
+async function ensureDepartment(tx: PrismaTx, name?: string | null) {
+  const normalized = text(name)
+  if (!normalized) return null
+
+  const existing = await tx.department.findFirst({ where: { name: { equals: normalized, mode: 'insensitive' } } })
+  if (existing) return existing.id
+
+  const department = await tx.department.create({
+    data: {
+      name: normalized,
+      isActive: true,
+    },
+  })
+  return department.id
+}
+
+async function findFundId(tx: PrismaTx, code?: string | null) {
+  const normalized = text(code) || 'koperasi'
+  const fund = await tx.fund.findFirst({
+    where: {
+      OR: [
+        { code: { equals: normalized, mode: 'insensitive' } },
+        { name: { contains: normalized, mode: 'insensitive' } },
+      ],
+      isActive: true,
+    },
+  })
+  return fund?.id ?? 'f1'
+}
+
+async function findCashSourceId(tx: PrismaTx, name?: string | null) {
+  const normalized = text(name)
+  const source = normalized
+    ? await tx.cashSource.findFirst({ where: { name: { contains: normalized, mode: 'insensitive' }, isActive: true } })
+    : null
+  if (source) return source.id
+
+  const fallback = await tx.cashSource.findFirst({ where: { isActive: true }, orderBy: { name: 'asc' } })
+  if (!fallback) throw new Error('Sumber kas aktif belum tersedia.')
+  return fallback.id
+}
+
+async function findMemberByName(tx: PrismaTx, name: string) {
+  const normalized = normalizeName(name)
+  return tx.member.findFirst({ where: { normalizedName: normalized } })
+}
+
+async function ensureMember(
+  tx: PrismaTx,
+  input: {
+    name?: string | null
+    memberNo?: string | null
+    departmentName?: string | null
+    employeeType?: EmployeeType | string | null
+    joinedAt?: string | null
+  }
+) {
+  const name = text(input.name)
+  if (!name) return null
+
+  const memberNo = optionalText(input.memberNo)
+  const existingByNo = memberNo ? await tx.member.findUnique({ where: { memberNo } }) : null
+  if (existingByNo) return existingByNo.id
+
+  const normalizedName = normalizeName(name)
+  const existingByName = await tx.member.findFirst({ where: { normalizedName } })
+  if (existingByName) return existingByName.id
+
+  const departmentId = await ensureDepartment(tx, input.departmentName)
+  const member = await tx.member.create({
+    data: {
+      memberNo,
+      name,
+      normalizedName,
+      departmentId,
+      employeeType: text(input.employeeType) || 'Unknown',
+      status: 'active',
+      joinedAt: input.joinedAt ? asDate(input.joinedAt) : null,
+    },
+  })
+
+  return member.id
+}
+
+function mappedImportRows(summary: unknown) {
+  if (!summary || typeof summary !== 'object' || Array.isArray(summary)) return null
+  const mappedRows = (summary as NonNullable<ImportBatch['summary']>).mappedRows
+  if (!mappedRows) return null
+
+  return {
+    members: Array.isArray(mappedRows.members) ? mappedRows.members : [],
+    dues: Array.isArray(mappedRows.dues) ? mappedRows.dues : [],
+    cashTransactions: Array.isArray(mappedRows.cashTransactions) ? mappedRows.cashTransactions : [],
+    loans: Array.isArray(mappedRows.loans) ? mappedRows.loans : [],
+  }
+}
+
+function rowRefList(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return value
+    .map(item => typeof item === 'number' ? item : text(item))
+    .filter(item => typeof item === 'number' ? Number.isInteger(item) && item > 0 : Boolean(item))
+}
+
+function importSkippedRows(input: Record<string, unknown>): Required<ImportSkippedRows> {
+  const source = input.skippedRows && typeof input.skippedRows === 'object' && !Array.isArray(input.skippedRows)
+    ? input.skippedRows as Record<string, unknown>
+    : {}
+
+  return {
+    members: rowRefList(source.members),
+    dues: rowRefList(source.dues),
+    cashTransactions: rowRefList(source.cashTransactions),
+    loans: rowRefList(source.loans),
+  }
+}
+
+function importCommitGroups(input: Record<string, unknown>): ImportRowGroup[] {
+  if (!Array.isArray(input.groups)) return IMPORT_GROUPS
+
+  const groups = input.groups.filter((group): group is ImportRowGroup => IMPORT_GROUPS.includes(group as ImportRowGroup))
+  return groups.length > 0 ? Array.from(new Set(groups)) : IMPORT_GROUPS
+}
+
+function importGroupLabel(group: ImportRowGroup) {
+  if (group === 'members') return 'Anggota'
+  if (group === 'dues') return 'Iuran'
+  if (group === 'cashTransactions') return 'Buku Kas'
+  return 'Pinjaman'
+}
+
+function importCommittedGroups(summary: unknown): Record<ImportRowGroup, boolean> {
+  const source = summary && typeof summary === 'object' && !Array.isArray(summary)
+    ? (summary as NonNullable<ImportBatch['summary']>).committedGroups
+    : undefined
+
+  return {
+    members: Boolean(source?.members),
+    dues: Boolean(source?.dues),
+    cashTransactions: Boolean(source?.cashTransactions),
+    loans: Boolean(source?.loans),
+  }
+}
+
+function importCommittedCounts(summary: unknown) {
+  const source = summary && typeof summary === 'object' && !Array.isArray(summary)
+    ? (summary as NonNullable<ImportBatch['summary']>).committedCounts
+    : undefined
+
+  return {
+    members: countLike(source?.members, 0),
+    contributions: countLike(source?.contributions, 0),
+    transactions: countLike(source?.transactions, 0),
+    loans: countLike(source?.loans, 0),
+  }
+}
+
+function importConflictSets(summary: unknown) {
+  const source = summary && typeof summary === 'object' && !Array.isArray(summary)
+    ? (summary as NonNullable<ImportBatch['summary']>).conflictRows
+    : undefined
+
+  return {
+    members: new Set(rowRefList(source?.members)),
+    dues: new Set(rowRefList(source?.dues)),
+    cashTransactions: new Set(rowRefList(source?.cashTransactions)),
+    loans: new Set(rowRefList(source?.loans)),
+  }
+}
+
+async function detectExistingImportConflicts(summary: NonNullable<ImportBatch['summary']>): Promise<Required<NonNullable<ImportBatch['summary']>['conflictRows']>> {
+  const rows = mappedImportRows(summary)
+  const conflicts: Required<NonNullable<ImportBatch['summary']>['conflictRows']> = {
+    members: [],
+    dues: [],
+    cashTransactions: [],
+    loans: [],
+  }
+  if (!rows) return conflicts
+
+  for (const row of rows.members) {
+    const memberNo = optionalText(row.memberNo)
+    const existing = await prisma.member.findFirst({
+      where: {
+        OR: [
+          ...(memberNo ? [{ memberNo }] : []),
+          { normalizedName: normalizeName(row.name) },
+        ],
+      },
+      select: { id: true },
+    })
+    if (existing) conflicts.members.push(importRowRef(row))
+  }
+
+  if (rows.dues.length > 0) {
+    const memberNames = Array.from(new Set(rows.dues.map(row => normalizeName(row.memberName)).filter(Boolean)))
+    const members = await prisma.member.findMany({
+      where: { normalizedName: { in: memberNames } },
+      select: { id: true, normalizedName: true },
+    })
+    const memberIdByName = new Map(members.map(member => [member.normalizedName, member.id]))
+    const funds = await prisma.fund.findMany({
+      where: { isActive: true },
+      select: { id: true, code: true, name: true },
+    })
+    const fundIdForCode = (code?: string | null) => {
+      const normalized = normalizeName(text(code) || 'koperasi')
+      return funds.find(fund => normalizeName(fund.code) === normalized || normalizeName(fund.name).includes(normalized))?.id ?? 'f1'
+    }
+    const periodKey = (date: Date) => date.toISOString().slice(0, 10)
+    const dueLookups = rows.dues.flatMap(row => {
+      const memberId = memberIdByName.get(normalizeName(row.memberName))
+      if (!memberId) return []
+      const fundId = fundIdForCode(row.fundCode)
+      const periodMonth = fromDateInput(row.periodMonth, `Periode iuran baris ${row.row}`)
+      return [{ rowRef: importRowRef(row), memberId, fundId, periodMonth }]
+    })
+    const existingDues = dueLookups.length > 0
+      ? await prisma.memberContribution.findMany({
+        where: {
+          memberId: { in: Array.from(new Set(dueLookups.map(item => item.memberId))) },
+          fundId: { in: Array.from(new Set(dueLookups.map(item => item.fundId))) },
+          periodMonth: { in: Array.from(new Map(dueLookups.map(item => [periodKey(item.periodMonth), item.periodMonth])).values()) },
+        },
+        select: { memberId: true, fundId: true, periodMonth: true },
+      })
+      : []
+    const existingKeys = new Set(existingDues.map(item => `${item.memberId}|${item.fundId}|${periodKey(item.periodMonth)}`))
+    const dueConflictRows = new Set<ImportRowRef>()
+
+    for (const lookup of dueLookups) {
+      if (existingKeys.has(`${lookup.memberId}|${lookup.fundId}|${periodKey(lookup.periodMonth)}`)) {
+        dueConflictRows.add(lookup.rowRef)
+      }
+    }
+
+    conflicts.dues = Array.from(dueConflictRows).sort((a, b) => String(a).localeCompare(String(b)))
+  }
+
+  for (const row of rows.cashTransactions) {
+    const counterpartyName = optionalText(row.counterpartyName)
+    const existing = await prisma.cashTransaction.findFirst({
+      where: {
+        transactionDate: fromDateInput(row.transactionDate, `Tanggal kas baris ${row.row}`),
+        direction: row.direction,
+        category: text(row.category) || 'Impor',
+        amountIdr: positiveNumber(row.amountIdr, `Nominal kas baris ${row.row}`),
+        counterpartyName,
+      },
+      select: { id: true },
+    })
+    if (existing) conflicts.cashTransactions.push(importRowRef(row))
+  }
+
+  for (const row of rows.loans) {
+    const existing = await prisma.loan.findFirst({
+      where: {
+        loanDate: fromDateInput(row.loanDate, `Tanggal pinjaman baris ${row.row}`),
+        principalAmountIdr: positiveNumber(row.principalAmountIdr, `Pokok pinjaman baris ${row.row}`),
+        OR: [
+          { counterpartyName: { equals: text(row.borrowerName), mode: 'insensitive' } },
+          { member: { normalizedName: normalizeName(row.borrowerName) } },
+        ],
+      },
+      select: { id: true },
+    })
+    if (existing) conflicts.loans.push(importRowRef(row))
+  }
+
+  return conflicts
 }
 
 export async function getBootstrapState() {
@@ -630,40 +943,390 @@ export async function createImportPreview(input: Record<string, unknown>) {
     throw new Error('Format file impor wajib .xlsx atau .xls.')
   }
 
+  const summary = importSummary(input)
+  summary.conflictRows = await detectExistingImportConflicts(summary)
+
   const batch = await prisma.importBatch.create({
     data: {
       id: text(input.id) || undefined,
       fileName: text(input.fileName) || importFileName(originalFileName),
       originalFileName,
       status: 'previewed',
-      summaryJson: importSummary(input),
+      summaryJson: summary,
     },
   })
 
   return mapImportBatch(batch)
 }
 
-export async function commitImportBatch(id: string) {
+export async function deleteImportPreviewBatch(id: string) {
+  const existing = await prisma.importBatch.findUnique({ where: { id } })
+  if (!existing) return null
+  if (existing.status === 'committed') {
+    throw new Error('Batch impor yang sudah committed tidak bisa dihapus dari cleanup preview.')
+  }
+
+  await prisma.$transaction(async tx => {
+    await tx.importBatch.delete({ where: { id } })
+    await tx.auditLog.create({
+      data: {
+        userName: SYSTEM_USER_NAME,
+        action: 'import.preview_delete',
+        entityType: 'import_batch',
+        entityId: id,
+      },
+    })
+  })
+
+  return mapImportBatch(existing)
+}
+
+export async function cleanupImportPreviewBatches({
+  olderThanDays = 7,
+  dryRun = false,
+}: {
+  olderThanDays?: number
+  dryRun?: boolean
+} = {}) {
+  const days = Math.max(0, Math.min(Math.round(olderThanDays), 3650))
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000)
+  const batches = await prisma.importBatch.findMany({
+    where: {
+      status: { not: 'committed' },
+      createdAt: { lt: cutoff },
+    },
+    select: { id: true },
+    orderBy: { createdAt: 'asc' },
+  })
+  const deletedIds = batches.map(batch => batch.id)
+
+  if (!dryRun && deletedIds.length > 0) {
+    await prisma.$transaction(async tx => {
+      await tx.importBatch.deleteMany({
+        where: { id: { in: deletedIds } },
+      })
+      await tx.auditLog.create({
+        data: {
+          userName: SYSTEM_USER_NAME,
+          action: 'import.preview_bulk_delete',
+          entityType: 'import_batch',
+          entityId: `older_than_${days}d`,
+        },
+      })
+    })
+  }
+
+  return {
+    deletedCount: deletedIds.length,
+    deletedIds,
+    cutoff: cutoff.toISOString(),
+    dryRun,
+  }
+}
+
+function prepareImportCommit(existing: {
+  id: string
+  status: string
+  summaryJson: Prisma.JsonValue | null
+}, input: Record<string, unknown> = {}) {
+  if (existing.status === 'committed') {
+    throw new Error('Batch impor sudah committed. Tidak ada grup yang perlu disimpan lagi.')
+  }
+
+  const rows = mappedImportRows(existing.summaryJson)
+  if (!rows) {
+    throw new Error('Mapping impor belum tersedia. Buat preview dari file Excel terlebih dahulu.')
+  }
+  const mappedRowCount = rows.members.length + rows.dues.length + rows.cashTransactions.length + rows.loans.length
+  if (mappedRowCount === 0) {
+    throw new Error('Preview impor tidak punya baris mapped. Upload file Excel valid sebelum commit.')
+  }
+  const skippedRows = importSkippedRows(input)
+  const skippedSets = {
+    members: new Set(skippedRows.members),
+    dues: new Set(skippedRows.dues),
+    cashTransactions: new Set(skippedRows.cashTransactions),
+    loans: new Set(skippedRows.loans),
+  }
+  const requestedGroups = importCommitGroups(input)
+  const previousCommittedGroups = importCommittedGroups(existing.summaryJson)
+  if (IMPORT_GROUPS.every(group => previousCommittedGroups[group])) {
+    throw new Error('Semua grup impor sudah committed. Tidak ada data yang perlu disimpan lagi.')
+  }
+  const groupsToCommit = requestedGroups.filter(group => !previousCommittedGroups[group])
+  if (groupsToCommit.length === 0) {
+    throw new Error(`${requestedGroups.map(importGroupLabel).join(', ')} sudah committed. Pilih grup lain atau impor file baru.`)
+  }
+  const groupSet = new Set(groupsToCommit)
+  const rowsToCommit = {
+    members: rows.members.filter(row => !hasImportRowRef(skippedSets.members, row)),
+    dues: rows.dues.filter(row => !hasImportRowRef(skippedSets.dues, row)),
+    cashTransactions: rows.cashTransactions.filter(row => !hasImportRowRef(skippedSets.cashTransactions, row)),
+    loans: rows.loans.filter(row => !hasImportRowRef(skippedSets.loans, row)),
+  }
+  const selectedAcceptedRowCount = groupsToCommit.reduce((total, group) => total + rowsToCommit[group].length, 0)
+  if (selectedAcceptedRowCount === 0) {
+    throw new Error('Tidak ada baris aktif untuk grup impor terpilih. Batalkan skip baris atau pilih grup lain.')
+  }
+
+  const conflictSets = importConflictSets(existing.summaryJson)
+  const groupStats = IMPORT_GROUPS.map(group => {
+    const groupRows = rows[group]
+    const acceptedRows = rowsToCommit[group]
+    const updates = acceptedRows.filter(row => hasImportRowRef(conflictSets[group], row)).length
+    const skipped = groupRows.filter(row => hasImportRowRef(skippedSets[group], row)).length
+    const committed = previousCommittedGroups[group]
+    const ready = acceptedRows.length
+
+    return {
+      group,
+      label: importGroupLabel(group),
+      total: groupRows.length,
+      skipped,
+      ready,
+      updates,
+      created: Math.max(ready - updates, 0),
+      committed,
+      willCommit: groupsToCommit.includes(group),
+      blockedReason: committed
+        ? `${importGroupLabel(group)} sudah committed.`
+        : ready === 0
+          ? `Tidak ada baris aktif untuk ${importGroupLabel(group)}.`
+          : null,
+    }
+  })
+
+  return {
+    groupsToCommit,
+    groupSet: new Set(groupsToCommit),
+    rowsToCommit,
+    skippedRows,
+    previousCommittedGroups,
+    groupStats,
+    totals: {
+      total: groupStats.reduce((sum, group) => sum + group.total, 0),
+      skipped: groupStats.reduce((sum, group) => sum + group.skipped, 0),
+      ready: groupStats.reduce((sum, group) => sum + group.ready, 0),
+      updates: groupStats.reduce((sum, group) => sum + group.updates, 0),
+      created: groupStats.reduce((sum, group) => sum + group.created, 0),
+    },
+  }
+}
+
+export async function simulateImportCommitBatch(id: string, input: Record<string, unknown> = {}) {
   const existing = await prisma.importBatch.findUnique({ where: { id } })
   if (!existing) return null
 
-  if (existing.status === 'committed') {
-    return mapImportBatch(existing)
+  try {
+    const prepared = prepareImportCommit(existing, input)
+    return {
+      canCommit: true,
+      issues: [] as string[],
+      requestedGroups: importCommitGroups(input),
+      groupsToCommit: prepared.groupsToCommit,
+      groups: prepared.groupStats,
+      totals: prepared.totals,
+    }
+  } catch (error) {
+    return {
+      canCommit: false,
+      issues: [error instanceof Error ? error.message : 'Commit impor belum siap.'],
+      requestedGroups: importCommitGroups(input),
+      groupsToCommit: [] as ImportRowGroup[],
+      groups: [] as Array<{
+        group: ImportRowGroup
+        label: string
+        total: number
+        skipped: number
+        ready: number
+        updates: number
+        created: number
+        committed: boolean
+        willCommit: boolean
+        blockedReason: string | null
+      }>,
+      totals: { total: 0, skipped: 0, ready: 0, updates: 0, created: 0 },
+    }
   }
+}
+
+export async function commitImportBatch(id: string, input: Record<string, unknown> = {}) {
+  const existing = await prisma.importBatch.findUnique({ where: { id } })
+  if (!existing) return null
+
+  const prepared = prepareImportCommit(existing, input)
+  const {
+    groupsToCommit,
+    groupSet,
+    rowsToCommit,
+    skippedRows,
+    previousCommittedGroups,
+  } = prepared
 
   const batch = await prisma.$transaction(async tx => {
+    const committedCounts = importCommittedCounts(existing.summaryJson)
+
+    if (groupSet.has('members')) {
+      for (const row of rowsToCommit.members) {
+        const memberId = await ensureMember(tx, {
+          name: row.name,
+          memberNo: row.memberNo,
+          departmentName: row.departmentName,
+          employeeType: row.employeeType,
+          joinedAt: row.joinedAt,
+        })
+        if (memberId) committedCounts.members += 1
+      }
+    }
+
+    if (groupSet.has('dues')) {
+      for (const row of rowsToCommit.dues) {
+        const memberId = await ensureMember(tx, { name: row.memberName })
+        if (!memberId) throw new Error(`Baris iuran ${row.row}: nama anggota wajib diisi.`)
+
+        const fundId = await findFundId(tx, row.fundCode)
+        const periodMonth = fromDateInput(row.periodMonth, `Periode iuran baris ${row.row}`)
+        await tx.memberContribution.upsert({
+          where: {
+            memberId_fundId_periodMonth: {
+              memberId,
+              fundId,
+              periodMonth,
+            },
+          },
+          update: {
+            amountIdr: nonNegativeNumber(row.amountIdr, `Nominal iuran baris ${row.row}`),
+            note: optionalText(row.note),
+          },
+          create: {
+            id: stableImportId('mc', id, row.importKey ?? `${row.row}_${row.fundCode}_${row.periodMonth}`),
+            memberId,
+            fundId,
+            periodMonth,
+            amountIdr: nonNegativeNumber(row.amountIdr, `Nominal iuran baris ${row.row}`),
+            note: optionalText(row.note),
+          },
+        })
+        committedCounts.contributions += 1
+      }
+    }
+
+    if (groupSet.has('cashTransactions')) {
+      for (const row of rowsToCommit.cashTransactions) {
+        const counterpartyName = optionalText(row.counterpartyName)
+        const member = counterpartyName ? await findMemberByName(tx, counterpartyName) : null
+        const fundId = row.fundCode ? await findFundId(tx, row.fundCode) : null
+        const transactionId = stableImportId('ct', id, [
+          row.importKey ?? row.row,
+          row.transactionDate,
+          row.direction,
+          row.category,
+          row.amountIdr,
+          counterpartyName,
+        ].join('_'))
+        await tx.cashTransaction.upsert({
+          where: { id: transactionId },
+          update: {
+            transactionDate: fromDateInput(row.transactionDate, `Tanggal kas baris ${row.row}`),
+            direction: row.direction,
+            fundId,
+            memberId: member?.id ?? null,
+            counterpartyName,
+            category: text(row.category) || 'Impor',
+            amountIdr: positiveNumber(row.amountIdr, `Nominal kas baris ${row.row}`),
+            note: optionalText(row.note),
+          },
+          create: {
+            id: transactionId,
+            transactionDate: fromDateInput(row.transactionDate, `Tanggal kas baris ${row.row}`),
+            direction: row.direction,
+            fundId,
+            memberId: member?.id ?? null,
+            counterpartyName,
+            category: text(row.category) || 'Impor',
+            amountIdr: positiveNumber(row.amountIdr, `Nominal kas baris ${row.row}`),
+            note: optionalText(row.note),
+          },
+        })
+        committedCounts.transactions += 1
+      }
+    }
+
+    if (groupSet.has('loans')) {
+      for (const row of rowsToCommit.loans) {
+        const memberId = await ensureMember(tx, { name: row.borrowerName })
+        if (!memberId) throw new Error(`Baris pinjaman ${row.row}: nama peminjam wajib diisi.`)
+
+        const principalAmountIdr = positiveNumber(row.principalAmountIdr, `Pokok pinjaman baris ${row.row}`)
+        const paidAmountIdr = nonNegativeNumber(row.paidAmountIdr ?? 0, `Terbayar pinjaman baris ${row.row}`)
+        if (paidAmountIdr > principalAmountIdr) {
+          throw new Error(`Baris pinjaman ${row.row}: terbayar tidak boleh melebihi pokok pinjaman.`)
+        }
+
+        const remainingAmountIdr = Math.max(principalAmountIdr - paidAmountIdr, 0)
+        const loanId = stableImportId('ln', id, [
+          row.importKey ?? row.row,
+          row.loanDate,
+          row.borrowerName,
+          row.cashSourceName,
+          row.principalAmountIdr,
+        ].join('_'))
+        await tx.loan.upsert({
+          where: { id: loanId },
+          update: {
+            memberId,
+            counterpartyName: text(row.borrowerName),
+            cashSourceId: await findCashSourceId(tx, row.cashSourceName),
+            principalAmountIdr,
+            paidAmountIdr,
+            remainingAmountIdr,
+            loanDate: fromDateInput(row.loanDate, `Tanggal pinjaman baris ${row.row}`),
+            status: remainingAmountIdr === 0 ? 'paid' : 'active',
+            note: optionalText(row.note),
+          },
+          create: {
+            id: loanId,
+            memberId,
+            counterpartyName: text(row.borrowerName),
+            cashSourceId: await findCashSourceId(tx, row.cashSourceName),
+            principalAmountIdr,
+            paidAmountIdr,
+            remainingAmountIdr,
+            loanDate: fromDateInput(row.loanDate, `Tanggal pinjaman baris ${row.row}`),
+            status: remainingAmountIdr === 0 ? 'paid' : 'active',
+            note: optionalText(row.note),
+          },
+        })
+        committedCounts.loans += 1
+      }
+    }
+
+    const previousSummary = existing.summaryJson && typeof existing.summaryJson === 'object' && !Array.isArray(existing.summaryJson)
+      ? existing.summaryJson as Record<string, unknown>
+      : {}
+    const committedGroups = {
+      ...previousCommittedGroups,
+      ...Object.fromEntries(groupsToCommit.map(group => [group, true])),
+    } as Record<ImportRowGroup, boolean>
+    const isFullyCommitted = IMPORT_GROUPS.every(group => committedGroups[group])
     const saved = await tx.importBatch.update({
       where: { id },
       data: {
-        status: 'committed',
-        committedAt: new Date(),
+        status: isFullyCommitted ? 'committed' : 'previewed',
+        committedAt: isFullyCommitted ? new Date() : existing.committedAt,
+        summaryJson: {
+          ...previousSummary,
+          skippedRows,
+          committedGroups,
+          committedCounts,
+        } as Prisma.InputJsonObject,
       },
     })
 
     await tx.auditLog.create({
       data: {
         userName: SYSTEM_USER_NAME,
-        action: 'import.commit',
+        action: isFullyCommitted ? 'import.commit' : 'import.partial_commit',
         entityType: 'import_batch',
         entityId: id,
       },

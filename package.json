@@ -10,6 +10,9 @@
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit",
+    "qa:api-import": "node scripts/qa-api-import.mjs",
+    "qa:responsive": "node scripts/qa-responsive.mjs",
+    "qa:all": "npm run typecheck && npm run qa:api-import && npm run qa:responsive && npm run build",
     "db:generate": "prisma generate",
     "db:push": "prisma db push",
     "db:seed": "node prisma/seed.js",
@@ -23,6 +26,7 @@
     "react-dom": "^19.2.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",

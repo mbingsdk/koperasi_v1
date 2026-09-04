@@ -1,7 +1,7 @@
 import { ok } from '@/lib/server/api-response'
 import { createImportPreview } from '@/lib/server/repository'
 import { isAuthFailure, mutationError, requireRole } from '@/lib/server/route-helpers'
-import { parseImportWorkbook } from '@/lib/server/import-parser'
+import { mergeImportSummaries, parseImportWorkbook } from '@/lib/server/import-parser'
 
 function asText(value: FormDataEntryValue | null) {
   return typeof value === 'string' ? value : ''
@@ -12,16 +12,22 @@ async function readImportPayload(request: Request) {
 
   if (contentType.includes('multipart/form-data')) {
     const form = await request.formData()
-    const file = form.get('file')
-    const fileName = file && typeof file === 'object' && 'name' in file
-      ? String((file as { name?: unknown }).name ?? '')
-      : ''
-    const workbookSummary = file && typeof file === 'object' && 'arrayBuffer' in file
-      ? await parseImportWorkbook(await (file as Blob).arrayBuffer())
-      : undefined
+    const files = [...form.getAll('files'), ...form.getAll('file')]
+      .filter(file => file && typeof file === 'object' && 'arrayBuffer' in file) as Blob[]
+    const fileNames = files.map(file => 'name' in file ? String((file as { name?: unknown }).name ?? '') : '').filter(Boolean)
+    const summaries = await Promise.all(files.map(async (file, index) => parseImportWorkbook(
+      await file.arrayBuffer(),
+      {
+        sourceFileName: fileNames[index],
+        warnMissingSheets: files.length <= 1,
+      }
+    )))
+    const workbookSummary = summaries.length > 1
+      ? mergeImportSummaries(summaries)
+      : summaries[0]
 
     return {
-      originalFileName: fileName || asText(form.get('originalFileName')) || asText(form.get('fileName')),
+      originalFileName: fileNames.join(' + ') || asText(form.get('originalFileName')) || asText(form.get('fileName')),
       summary: workbookSummary,
       membersDetected: asText(form.get('membersDetected')),
       contributionsDetected: asText(form.get('contributionsDetected')),

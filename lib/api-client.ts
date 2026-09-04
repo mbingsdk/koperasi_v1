@@ -8,6 +8,8 @@ import type {
   Department,
   Fund,
   ImportBatch,
+  ImportRowGroup,
+  ImportSkippedRows,
   Loan,
   Member,
   MemberContribution,
@@ -42,6 +44,39 @@ export interface ReportSummary {
   period: {
     from: string | null
     to: string | null
+  }
+}
+
+export interface ImportPreviewCleanupResult {
+  deletedCount: number
+  deletedIds: string[]
+  cutoff: string
+  dryRun: boolean
+}
+
+export interface ImportCommitSimulation {
+  canCommit: boolean
+  issues: string[]
+  requestedGroups: ImportRowGroup[]
+  groupsToCommit: ImportRowGroup[]
+  groups: Array<{
+    group: ImportRowGroup
+    label: string
+    total: number
+    skipped: number
+    ready: number
+    updates: number
+    created: number
+    committed: boolean
+    willCommit: boolean
+    blockedReason: string | null
+  }>
+  totals: {
+    total: number
+    skipped: number
+    ready: number
+    updates: number
+    created: number
   }
 }
 
@@ -280,9 +315,32 @@ export const apiClient = {
     })
   },
 
-  commitImportBatch(id: string) {
+  commitImportBatch(id: string, payload?: { skippedRows?: ImportSkippedRows; groups?: ImportRowGroup[] }) {
     return request<ImportBatch>(`/api/v1/import-batches/${encodeURIComponent(id)}/commit`, {
       method: 'POST',
+      body: payload ? jsonBody(payload) : undefined,
+    })
+  },
+
+  simulateImportCommitBatch(id: string, payload?: { skippedRows?: ImportSkippedRows; groups?: ImportRowGroup[] }) {
+    return request<ImportCommitSimulation>(`/api/v1/import-batches/${encodeURIComponent(id)}/commit/simulate`, {
+      method: 'POST',
+      body: payload ? jsonBody(payload) : undefined,
+    })
+  },
+
+  deleteImportPreviewBatch(id: string) {
+    return request<ImportBatch>(`/api/v1/import-batches/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+    })
+  },
+
+  cleanupImportPreviewBatches(options: { olderThanDays?: number; dryRun?: boolean } = {}) {
+    const params = new URLSearchParams()
+    params.set('days', String(options.olderThanDays ?? 7))
+    if (options.dryRun) params.set('dryRun', '1')
+    return request<ImportPreviewCleanupResult>(`/api/v1/import-batches/maintenance?${params.toString()}`, {
+      method: 'DELETE',
     })
   },
 }

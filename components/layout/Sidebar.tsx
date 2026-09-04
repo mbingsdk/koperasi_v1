@@ -74,7 +74,7 @@ export default function Sidebar() {
         </div>
         <button
           type="button"
-          className="inline-block mt-2.5 text-[10.5px] font-bold uppercase tracking-[.1em] text-ledger-deep"
+          className="sidebar-logout"
           onClick={logout}
         >
           Keluar

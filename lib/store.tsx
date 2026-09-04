@@ -74,6 +74,8 @@ export type KoperasiAction =
   | { type: 'user.upsert'; user: User }
   | { type: 'user.deactivate'; id: string }
   | { type: 'import_batch.upsert'; batch: ImportBatch }
+  | { type: 'import_batch.delete'; id: string }
+  | { type: 'import_batch.deleteMany'; ids: string[] }
 
 interface StoreValue {
   state: KoperasiState
@@ -125,6 +127,32 @@ function withMeta(state: BootstrapState): KoperasiState {
   return {
     ...state,
     meta: { hydrated: true, version: 3, updatedAt: nowIso() },
+  }
+}
+
+function compactStateForStorage(state: KoperasiState): KoperasiState {
+  return {
+    ...state,
+    importBatches: state.importBatches.map(batch => {
+      if (!batch.summary) return batch
+
+      const {
+        mappedRows: _mappedRows,
+        duplicateRows: _duplicateRows,
+        duplicateGroups: _duplicateGroups,
+        conflictRows: _conflictRows,
+        warningDetails,
+        ...summary
+      } = batch.summary
+
+      return {
+        ...batch,
+        summary: {
+          ...summary,
+          warningDetails: warningDetails?.slice(0, 50),
+        },
+      }
+    }),
   }
 }
 
@@ -248,6 +276,21 @@ function reducer(state: KoperasiState, action: KoperasiAction): KoperasiState {
         meta: { ...state.meta, updatedAt: nowIso() },
       }
     }
+    case 'import_batch.delete': {
+      return {
+        ...state,
+        importBatches: state.importBatches.filter(batch => batch.id !== action.id),
+        meta: { ...state.meta, updatedAt: nowIso() },
+      }
+    }
+    case 'import_batch.deleteMany': {
+      const ids = new Set(action.ids)
+      return {
+        ...state,
+        importBatches: state.importBatches.filter(batch => !ids.has(batch.id)),
+        meta: { ...state.meta, updatedAt: nowIso() },
+      }
+    }
     default:
       return state
   }
@@ -285,7 +328,11 @@ export function KoperasiStoreProvider({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     if (!ready) return
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(compactStateForStorage(state)))
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY)
+    }
   }, [ready, state])
 
   const value = useMemo<StoreValue>(() => ({

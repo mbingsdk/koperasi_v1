@@ -13,8 +13,7 @@ Buku kas digital koperasi dengan pengalaman **mobile-first ledger modern**. Fron
 - Backend: Next API routes + Prisma + PostgreSQL
 - Auth: cookie session HTTP-only untuk login demo PostgreSQL
 - Permission UI: tombol mutasi mengikuti role session aktif
-- Import parser: `exceljs` untuk membaca workbook Excel di API
-- Zero runtime dependencies beyond Next.js
+- Import parser: `exceljs` untuk membaca dan memetakan workbook Excel di API
 
 ## Getting Started
 
@@ -39,8 +38,8 @@ Admin ledger: bendahara@koperasi.local / password
 - Iuran: input massal, isi tarif default, catatan, simpan batch ke PostgreSQL.
 - Buku Kas: transaksi masuk/keluar, saldo berjalan, edit/hapus ke PostgreSQL.
 - Pinjaman: tambah pinjaman, catat angsuran ke PostgreSQL, validasi tidak melebihi sisa, status lunas otomatis.
-- Laporan: laporan bulanan, buku kas, tunggakan, pinjaman, summary API PostgreSQL, ekspor CSV.
-- Import: upload Excel dibaca backend, sheet dihitung, warning parser ditampilkan, preview batch disimpan ke PostgreSQL, lalu commit menandai batch dan membuat audit log.
+- Laporan: laporan bulanan, buku kas, tunggakan, pinjaman, summary API PostgreSQL, ekspor XLSX.
+- Import: upload Excel dibaca backend, sheet dihitung, warning parser ditampilkan, preview batch disimpan ke PostgreSQL, lalu commit atomik mengisi anggota, iuran, kas, pinjaman, dan audit log.
 - Pengaturan: pengguna, departemen, dana, sumber kas, tarif iuran sudah CRUD ke PostgreSQL; audit log dan reset demo PostgreSQL tersedia.
 - Permission hints: viewer mendapat UI read-only; admin bisa mutasi ledger/master data; super admin bisa kelola pengguna dan reset demo.
 
@@ -56,7 +55,7 @@ app/
     dues/                   Input iuran bulanan
     cash/                   Buku kas
     loans/                  Manajemen pinjaman + detail [id]
-    reports/                Laporan + ekspor CSV
+    reports/                Laporan + ekspor XLSX
     import/                 Wizard impor Excel
     settings/               Indeks pengaturan + master data
 
@@ -109,7 +108,8 @@ Entry point store ada di `lib/store.tsx`, sedangkan client API ada di `lib/api-c
 - `useCashLedger()`
 - `useLoans()`
 - `useReports()`
-- `downloadCsv()`
+- `downloadCsv()` fallback teknis untuk format ringan
+- `downloadXlsx()`
 - `dashboardMetrics()`
 
 Tombol **Reset data demo** di Pengaturan mengembalikan PostgreSQL ke seed dari `lib/mock-data.ts`, lalu state frontend ikut disegarkan.
@@ -119,9 +119,19 @@ Tombol **Reset data demo** di Pengaturan mengembalikan PostgreSQL ke seed dari `
 Jalankan sebelum lanjut backend:
 
 ```bash
+npm run qa:all
+```
+
+Atau jalankan per tahap:
+
+```bash
 npm run typecheck
+npm run qa:api-import
+npm run qa:responsive
 npm run build
 ```
+
+Script QA ini butuh dev server aktif di `http://localhost:3000` dan login demo `admin@koperasi.local / password`. `qa:responsive` juga butuh file contoh `untuk kk mbek*.xlsx` di root repo. Untuk file lain, set `QA_IMPORT_FILES="file1.xlsx;file2.xlsx"`.
 
 Smoke test route utama:
 
@@ -158,10 +168,11 @@ Breakpoint manual yang ditargetkan:
 - [x] Derived summary untuk dashboard, laporan, saldo, tunggakan, dan pinjaman.
 - [x] Audit log lokal untuk aksi penting.
 - [x] Toast sukses/error dan dialog konfirmasi.
-- [x] CSV export untuk laporan utama.
+- [x] XLSX export untuk laporan utama.
 - [x] Reset demo data dengan konfirmasi.
 - [x] Mobile cards untuk tabel utama.
 - [x] Build dan typecheck bersih.
+- [x] QA responsive import otomatis untuk 360 sampai 1536px.
 - [x] UI permission hints berdasarkan role session aktif.
 
 ## Backend Handoff Notes
@@ -170,8 +181,8 @@ Backend sudah dimulai. Sisa migrasi dari reducer/localStorage ke API dilakukan b
 
 - Role enforcement endpoint API sudah aktif untuk mutasi data.
 - API transaksi: members, dues, cash ledger, loans, dan loan payments sudah tersambung dari frontend.
-- API reports summary sudah tersambung; export server-side bisa ditambahkan bila file besar.
-- API import parser untuk Excel dan commit batch.
+- API reports summary sudah tersambung; export XLSX server-side bisa ditambahkan bila file besar.
+- API import parser untuk Excel, mapping baris domain, dan commit batch ke tabel ledger.
 
 Types di `lib/types.ts` sudah bisa dijadikan kontrak awal response API.
 
@@ -186,6 +197,9 @@ Fondasi API awal sudah tersedia dan endpoint utama sudah membaca/menulis Postgre
 /api/v1/auth/logout           POST clear cookie session
 /api/v1/bootstrap              PostgreSQL
 /api/v1/import-batches/preview POST preview batch impor Excel
+/api/v1/import-batches/maintenance DELETE cleanup preview lama
+/api/v1/import-batches/:id     DELETE cleanup satu preview
+/api/v1/import-batches/:id/commit/simulate POST simulasi commit read-only
 /api/v1/import-batches/:id/commit POST commit batch impor
 /api/v1/members                GET, POST
 /api/v1/members/:id            GET, PATCH, DELETE soft-deactivate
@@ -218,7 +232,7 @@ Role guard API:
 
 Frontend workflow utama sudah membaca/menulis PostgreSQL lewat API. `localStorage` dipertahankan sebagai fallback kompatibilitas sementara sampai strategi offline dan auth final stabil.
 
-Catatan import: parser XLSX sudah membaca nama sheet, jumlah baris domain utama, dan warning header/nominal awal. Commit hasil mapping ke tabel anggota/iuran/kas/pinjaman masih tahap berikutnya.
+Catatan import: parser XLSX membaca sheet, membuat warning header/nominal, memetakan baris domain utama, menyimpan ringkasan/grup duplikat per baris, menandai konflik dengan data PostgreSQL, menyediakan ekspor XLSX hasil review, mendukung opsi auto-skip duplikat saat preview, lalu commit batch menulis data ke anggota, iuran, buku kas, dan pinjaman dalam satu transaksi database.
 
 Dokumen lanjutan:
 

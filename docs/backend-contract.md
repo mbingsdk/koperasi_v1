@@ -12,8 +12,8 @@ Status saat ini:
 - Prisma schema PostgreSQL tersedia di `prisma/schema.prisma`.
 - Docker Compose Postgres lokal tersedia di `docker-compose.yml`.
 - Response shape dibuat konsisten: `{ data, meta }` atau `{ error }`.
-- Parser XLSX awal sudah membaca nama sheet, jumlah baris domain, dan warning header/nominal.
-- Belum ada commit data hasil mapping ke tabel ledger.
+- Parser XLSX sudah membaca nama sheet, jumlah baris domain, warning header/nominal, dan mapping baris ke payload ledger.
+- Commit import sudah menulis hasil mapping ke tabel anggota, iuran, kas, dan pinjaman dalam satu transaksi database.
 
 ## Response Shape
 
@@ -62,7 +62,7 @@ Error:
 | POST | `/api/v1/auth/login` | Login, validasi password, set cookie session |
 | POST | `/api/v1/auth/logout` | Logout dan clear cookie session |
 | POST | `/api/v1/import-batches/preview` | Buat preview batch impor dari JSON/FormData file |
-| POST | `/api/v1/import-batches/:id/commit` | Tandai batch impor committed dan buat audit log |
+| POST | `/api/v1/import-batches/:id/commit` | Commit mapping impor ke tabel ledger dan buat audit log |
 | POST | `/api/v1/members` | Tambah anggota |
 | PATCH | `/api/v1/members/:id` | Edit anggota |
 | DELETE | `/api/v1/members/:id` | Nonaktifkan anggota |
@@ -129,9 +129,9 @@ Error:
 
 Prioritas berikutnya:
 
-1. Mapping isi sheet XLSX ke payload ledger terstruktur
-2. Commit hasil mapping impor ke tabel ledger
-3. Server-side CSV export endpoints for large datasets
+1. Server-side CSV export endpoints for large datasets
+2. Persist preferensi import per user ketika auth final siap
+3. Strategi merge/update untuk baris import yang konflik dengan PostgreSQL
 
 ## Role Guard
 
@@ -159,10 +159,10 @@ Mutasi tanpa session mengembalikan `401 unauthorized`; session aktif dengan role
    - Login/logout -> `/api/v1/auth/*`
    - API mutation auth guard dan role enforcement
    - UI permission hints berdasarkan role session aktif
-   - Import preview/commit batch -> `/api/v1/import-batches/*`
+   - Import preview/mapping/duplicate summary/commit batch -> `/api/v1/import-batches/*`
 4. Next frontend migration:
    - CSV export -> optional server-side export endpoint for large datasets
-   - Mapping XLSX detail -> backend parser endpoints
+   - Import review UI -> koreksi mapping dan conflict resolution sebelum commit
 5. Remove localStorage only after auth and offline strategy are stable.
 
 ## PostgreSQL Setup

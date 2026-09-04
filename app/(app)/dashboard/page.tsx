@@ -153,7 +153,7 @@ export default function DashboardPage() {
               {([
                 ['/members', 'Cari kartu anggota'],
                 ['/cash', 'Audit buku kas'],
-                ['/reports', 'Ekspor laporan CSV'],
+                ['/reports', 'Ekspor laporan XLSX'],
                 ['/settings', 'Pengaturan data'],
               ] as const).map(([href, label]) => (
                 <Link key={href} href={href} className="action-item">

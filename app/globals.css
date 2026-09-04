@@ -3,6 +3,11 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --font-sans: Arial, Helvetica, sans-serif;
+    --font-mono: Consolas, "Liberation Mono", Menlo, monospace;
+  }
+
   * { box-sizing: border-box; }
   ::selection { background: #F2CB4E; }
 
@@ -453,15 +458,156 @@
   .import-map-card strong,
   .import-warning-card strong { @apply block text-[12.5px] uppercase tracking-[.06em] font-bold mt-1; }
   .import-map-card small { @apply block text-[12px] text-ink-soft mt-1; }
+  .import-preview-option {
+    @apply flex items-start gap-3 border border-ledger-pale bg-ledger-pale px-3.5 py-3 rounded-sm cursor-pointer;
+  }
+  .import-preview-option input {
+    @apply mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-ledger-deep)];
+  }
+  .import-preview-option span { @apply min-w-0; }
+  .import-preview-option strong {
+    @apply block text-[12px] uppercase tracking-[.08em] font-bold;
+  }
+  .import-preview-option small {
+    @apply block text-[12px] text-ink-soft mt-1 leading-relaxed;
+  }
   .import-section-head { @apply flex items-start justify-between gap-4 mb-4; }
   .import-section-head h2 { @apply text-[16px] uppercase tracking-[.07em] font-bold; }
   .import-section-head > span { @apply text-[12px] text-ink-soft font-mono; }
   .import-summary-grid { @apply grid grid-cols-2 xl:grid-cols-6 gap-3 mb-4; }
   .import-summary-grid > div { @apply border border-ledger-pale rounded-sm px-4 py-3.5; }
+  .import-breakdown-grid {
+    @apply grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4;
+  }
+  .import-breakdown-grid article {
+    @apply border border-ledger-pale bg-ledger-pale rounded-sm px-4 py-3;
+  }
+  .import-breakdown-grid article > strong {
+    @apply block text-[12px] uppercase tracking-[.08em] font-bold mb-2;
+  }
+  .import-breakdown-grid span {
+    @apply flex items-center justify-between gap-3 border-t border-ledger/10 py-2 text-[12px];
+  }
+  .import-breakdown-grid em {
+    @apply not-italic font-bold text-ledger-deep truncate;
+  }
+  .import-breakdown-grid small {
+    @apply shrink-0 font-mono text-[11px] text-ink-soft;
+  }
+  .import-file-list { @apply flex flex-wrap gap-2 mb-4; }
+  .import-file-list span {
+    @apply max-w-full truncate font-mono text-[12px] bg-paper border border-ledger-pale text-ink-soft px-3 py-1.5 rounded-sm;
+  }
   .import-sheet-list { @apply flex flex-wrap gap-2 mb-5; }
   .import-sheet-list span {
     @apply font-mono text-[12px] bg-ledger-pale text-ledger-deep px-3 py-1.5 rounded-sm;
   }
+  .import-review-panel { @apply mb-5; }
+  .import-review-tabs { @apply grid grid-cols-4 gap-2 mb-3; }
+  .import-review-tab {
+    @apply text-left border border-ledger-pale bg-paper rounded-sm px-3 py-3 transition-colors min-h-[66px];
+  }
+  .import-review-tab:hover { @apply bg-ledger-pale; }
+  .import-review-tab.active { @apply bg-ledger-deep border-ledger-deep text-paper; }
+  .import-review-tab span {
+    @apply block text-[10px] font-bold uppercase tracking-[.1em] text-ink-soft;
+  }
+  .import-review-tab.active span { @apply text-paper/70; }
+  .import-review-tab strong { @apply block font-mono text-[18px] font-semibold mt-1 tabular-nums; }
+  .import-review-tab small { @apply block mt-1 text-[11px] font-mono text-flag; }
+  .import-review-tab.active small { @apply text-paper/80; }
+  .import-review-tools {
+    @apply mb-3 flex items-end justify-between gap-3;
+  }
+  .import-review-tools label { @apply flex-1 min-w-0; }
+  .import-review-tools label span {
+    @apply block text-[10px] font-bold uppercase tracking-[.1em] text-ink-soft mb-1.5;
+  }
+  .import-review-tools input,
+  .import-review-tools select {
+    @apply h-11 w-full border border-ledger-pale bg-paper px-3.5 text-[14px] outline-none rounded-sm;
+  }
+  .import-review-tools input:focus,
+  .import-review-tools select:focus { @apply border-ledger-deep ring-2 ring-ledger-pale; }
+  .import-review-tools button {
+    @apply h-11 border border-ledger-pale bg-ledger-pale px-3.5 text-[11px] font-bold
+           uppercase tracking-[.08em] text-ledger-deep rounded-sm;
+  }
+  .import-review-ops {
+    @apply mb-3 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3;
+  }
+  .import-review-status {
+    @apply flex flex-wrap gap-1 border border-ledger-pale bg-ledger-pale p-1 rounded-sm;
+  }
+  .import-review-status button {
+    @apply min-h-[36px] flex-1 border-0 bg-transparent px-3 py-2 text-[11px] font-bold
+           uppercase tracking-[.08em] text-ledger-deep rounded-sm transition-colors;
+  }
+  .import-review-status button.active { @apply bg-ledger-deep text-paper; }
+  .import-review-bulk { @apply flex items-center gap-2; }
+  .import-review-bulk span { @apply hidden xl:block text-[12px] text-ink-soft font-mono; }
+  .import-review-bulk button {
+    @apply min-h-[38px] border border-ledger-pale bg-paper px-3 py-2 text-[11px] font-bold
+           uppercase tracking-[.08em] text-ledger-deep rounded-sm disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .import-review-bulk button:hover:not(:disabled) { @apply bg-ledger-pale; }
+  .import-review-export {
+    @apply mb-3 border border-ledger-pale bg-paper px-4 py-3 rounded-sm
+           flex items-center justify-between gap-3;
+  }
+  .import-review-export strong { @apply block text-[12px] uppercase tracking-[.08em] font-bold; }
+  .import-review-export span { @apply block text-[12px] text-ink-soft mt-1; }
+  .import-review-export button {
+    @apply min-h-[38px] shrink-0 border border-ledger-pale bg-ledger-pale px-3 py-2 text-[11px] font-bold
+           uppercase tracking-[.08em] text-ledger-deep rounded-sm disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .import-review-export button:hover:not(:disabled) { @apply bg-paper; }
+  .import-review-conflict {
+    @apply mb-3 border border-flag bg-flag-pale px-4 py-3 rounded-sm flex items-center justify-between gap-3;
+  }
+  .import-review-conflict strong { @apply text-[12px] uppercase tracking-[.08em] font-bold text-flag; }
+  .import-review-conflict span { @apply text-[12px] text-ink-soft; }
+  .import-review-window-meta {
+    @apply mb-2 flex items-center justify-between gap-3 border border-ledger-pale bg-ledger-pale px-3.5 py-2 rounded-sm;
+  }
+  .import-review-window-meta span { @apply text-[12px] text-ink-soft; }
+  .import-review-window-meta strong { @apply font-mono text-[12px] font-semibold text-ledger-deep tabular-nums; }
+  .import-review-viewport {
+    @apply overflow-y-auto border border-ledger-pale bg-ledger-pale p-2 rounded-sm;
+    max-height: min(560px, 70vh);
+    scrollbar-gutter: stable;
+  }
+  .import-review-spacer { @apply relative; }
+  .import-review-window { @apply absolute left-2 right-2 top-2 flex flex-col gap-3; }
+  .import-review-row {
+    @apply flex min-h-[208px] max-h-[208px] flex-col overflow-hidden border border-ledger-pale bg-paper rounded-sm px-4 py-3 min-w-0;
+  }
+  .import-review-row.skipped { @apply border-flag bg-flag-pale; }
+  .import-review-row.conflict:not(.skipped) { @apply border-flag; }
+  .import-review-row div { @apply flex items-start justify-between gap-3; }
+  .import-review-row span { @apply font-mono text-[11px] text-ink-soft shrink-0; }
+  .import-review-row strong {
+    @apply block text-[13px] uppercase tracking-[.04em] font-bold break-words text-right;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .import-review-row small { @apply block mt-2 truncate text-[12px] text-ink-soft leading-relaxed; }
+  .import-review-row em {
+    @apply mt-3 inline-flex min-h-[26px] items-center border border-flag bg-flag-pale px-2.5
+           text-[10px] not-italic font-bold uppercase tracking-[.08em] text-flag rounded-sm;
+  }
+  .import-review-toggle {
+    @apply mt-auto min-h-[36px] w-full border border-ledger-pale bg-ledger-pale px-3 py-2
+           text-[11px] font-bold uppercase tracking-[.08em] text-ledger-deep rounded-sm transition-colors;
+  }
+  .import-review-toggle:hover { @apply bg-paper; }
+  .import-review-row.skipped .import-review-toggle { @apply border-flag bg-paper text-flag; }
+  .import-review-empty {
+    @apply border border-dashed border-ledger-pale bg-ledger-pale rounded-sm px-4 py-5 text-[13px] text-ink-soft;
+  }
+  .import-warning-head { @apply pt-4 border-t border-ledger-pale; }
   .import-warning-list { @apply flex flex-col gap-3 mb-5; }
   .import-warning-card {
     @apply border border-flag bg-flag-pale rounded-sm px-4 py-3;
@@ -472,17 +618,83 @@
   }
   .import-commit-card h2 { @apply text-[16px] uppercase tracking-[.07em] font-bold mb-2; }
   .import-commit-card p:not(.eyebrow) { @apply text-[13px] text-ink-soft leading-relaxed; }
+  .import-preflight {
+    @apply mb-5 border border-ledger-pale bg-ledger-pale rounded-sm px-4 py-3
+           grid grid-cols-[minmax(0,.8fr)_minmax(0,1.2fr)] gap-4 items-start;
+  }
+  .import-preflight.blocked { @apply border-flag bg-flag-pale; }
+  .import-preflight span {
+    @apply block text-[10px] uppercase tracking-[.1em] font-bold text-ink-soft mb-1;
+  }
+  .import-preflight strong { @apply block text-[13px] uppercase tracking-[.07em] font-bold; }
+  .import-preflight p,
+  .import-preflight li { @apply text-[12px] text-ink-soft leading-relaxed; }
+  .import-preflight ul { @apply grid grid-cols-1 gap-1.5; }
+  .import-preflight li { @apply list-disc ml-4; }
+  .import-commit-grid {
+    @apply grid grid-cols-1 lg:grid-cols-4 gap-3 mb-5;
+  }
+  .import-commit-grid article {
+    @apply border border-ledger-pale bg-paper rounded-sm px-4 py-4 flex flex-col gap-3;
+  }
+  .import-commit-grid article.done {
+    @apply bg-ledger-pale border-ledger-pale;
+  }
+  .import-commit-grid span {
+    @apply block text-[10px] uppercase tracking-[.1em] font-bold text-ink-soft mb-1;
+  }
+  .import-commit-grid strong {
+    @apply block text-[14px] uppercase tracking-[.07em] font-bold;
+  }
+  .import-commit-grid small {
+    @apply block text-[12px] text-ink-soft mt-1 leading-snug;
+  }
+  .import-commit-grid p {
+    @apply text-[12px] font-mono text-ledger-deep;
+  }
+  .import-commit-grid dl {
+    @apply grid grid-cols-2 gap-2;
+  }
+  .import-commit-grid dl div {
+    @apply border border-ledger-pale bg-ledger-pale px-2.5 py-2 rounded-sm;
+  }
+  .import-commit-grid dt {
+    @apply text-[9px] uppercase tracking-[.1em] font-bold text-ink-soft;
+  }
+  .import-commit-grid dd {
+    @apply mt-1 font-mono text-[13px] font-semibold text-ledger-deep tabular-nums;
+  }
+  .import-commit-grid .btn {
+    @apply mt-auto w-full px-2.5 py-2 text-[11px];
+  }
+  .import-commit-reason {
+    @apply mt-auto block border border-flag bg-flag-pale px-2.5 py-2 rounded-sm
+           text-[10.5px] not-italic font-bold uppercase tracking-[.07em] text-flag leading-snug;
+  }
+  .import-commit-reason + .btn { @apply mt-2; }
   .import-actions { @apply flex justify-between gap-3; }
   .import-success { @apply text-center py-8; }
   .import-success span { @apply block font-mono text-[32px] font-bold text-ledger-deep mb-3; }
   .import-success h2 { @apply text-[16px] uppercase tracking-[.1em] font-bold mb-2; }
   .import-success p { @apply text-[13px] text-ink-soft mb-5; }
   .import-history { @apply mt-5; }
+  .import-history-maintenance {
+    @apply min-h-[38px] border border-ledger-pale bg-ledger-pale px-3.5 py-2
+           text-[10.5px] font-bold uppercase tracking-[.08em] text-ledger-deep rounded-sm
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .import-history-maintenance:hover:not(:disabled) { @apply bg-paper; }
   .import-history-list { @apply flex flex-col gap-3; }
   .import-history-card {
     @apply border border-ledger-pale rounded-sm px-4 py-3 flex items-end justify-between gap-4;
   }
   .import-history-card small { @apply block text-[12px] text-ink-soft mt-1; }
+  .import-history-cleanup {
+    @apply min-h-[36px] shrink-0 border border-margin-pale bg-paper px-3 py-2
+           text-[10.5px] font-bold uppercase tracking-[.08em] text-margin rounded-sm
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .import-history-cleanup:hover:not(:disabled) { @apply bg-margin-pale; }
 
   .panel { @apply bg-paper border border-ledger-pale rounded-sm; }
   .panel-body { @apply p-5; }
@@ -592,6 +804,11 @@
   .nav-item:hover { @apply bg-ledger-pale; }
   .nav-item.active { @apply bg-ledger-pale border-ledger-pale text-ledger-deep; }
   .sidebar-user-card { @apply flex flex-col gap-2; }
+  .sidebar-logout {
+    @apply mt-2.5 inline-flex min-h-[36px] items-center border border-ledger-pale bg-paper px-3 py-2
+           text-[10.5px] font-bold uppercase tracking-[.1em] text-ledger-deep rounded-sm;
+  }
+  .sidebar-logout:hover { @apply bg-ledger-pale; }
   .role-badge {
     @apply inline-flex w-fit items-center border border-ledger-pale bg-paper px-2.5 py-1
            text-[9.5px] font-extrabold uppercase tracking-[.12em] text-ink-soft rounded-sm;
@@ -634,7 +851,7 @@
     .mobile-topbar strong { @apply block text-[13px] uppercase tracking-[.07em]; }
     .mobile-topbar small { @apply block text-[10px] uppercase tracking-[.14em] text-ink-soft mt-0.5; }
     .mobile-more-button {
-      @apply border border-ledger-deep text-ledger-deep px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-[.08em];
+      @apply min-h-[40px] border border-ledger-deep text-ledger-deep px-3 py-2 rounded-sm text-[11px] font-bold uppercase tracking-[.08em];
     }
 
     .content-area { @apply px-4 pt-5 pb-[104px] max-w-none; }
@@ -783,9 +1000,32 @@
     .import-section-head { @apply flex-col gap-1; }
     .import-summary-grid { @apply grid-cols-2 gap-2; }
     .import-summary-grid > div { @apply px-3 py-3; }
+    .import-breakdown-grid { @apply grid-cols-1 gap-2; }
+    .import-breakdown-grid article { @apply px-3 py-2.5; }
+    .import-breakdown-grid span { @apply items-start flex-col gap-1; }
+    .import-breakdown-grid small { @apply shrink; }
+    .import-review-tabs {
+      @apply -mx-1 px-1 flex overflow-x-auto gap-2 pb-1;
+    }
+    .import-review-tab { @apply min-w-[120px] px-3 py-2.5; }
+    .import-review-tools { @apply flex-col items-stretch gap-2; }
+    .import-review-tools button { @apply w-full; }
+    .import-review-ops { @apply grid-cols-1 gap-2; }
+    .import-review-bulk { @apply grid grid-cols-1 gap-2; }
+    .import-review-bulk span { @apply block; }
+    .import-review-bulk button { @apply w-full px-2; }
+    .import-review-export { @apply flex-col items-stretch; }
+    .import-review-export button { @apply w-full; }
+    .import-review-conflict { @apply flex-col items-start; }
+    .import-review-window-meta { @apply flex-col items-start gap-1.5; }
+    .import-review-row div { @apply flex-col gap-1; }
+    .import-review-row strong { @apply text-left; }
+    .import-preflight { @apply grid-cols-1 gap-3; }
     .import-actions { @apply grid grid-cols-2 gap-2; }
     .import-actions .btn { @apply w-full px-3; }
     .import-history-card { @apply items-start flex-col; }
+    .import-history-maintenance { @apply w-full; }
+    .import-history-cleanup { @apply w-full; }
 
     .settings-header-reset { @apply hidden; }
     .settings-hero { @apply grid-cols-1 gap-4 px-4 py-4 mb-4; }
